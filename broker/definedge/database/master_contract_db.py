@@ -76,15 +76,15 @@ def download_definedge_master_files(auth_token, output_path):
 
         for exchange in exchanges:
             try:
-                conn = http.client.HTTPSConnection("data.definedgesecurities.com")
+                conn = http.client.HTTPSConnection("integrate.definedgesecurities.com")
 
                 headers = {
                     'Authorization': api_session_key,
                     'Content-Type': 'application/json'
                 }
 
-                # Request master file for the exchange
-                conn.request("GET", f"/master/{exchange.lower()}", '', headers)
+                # Request master file for the exchange using the correct API endpoint
+                conn.request("GET", f"/dart/v1/master/{exchange.lower()}", '', headers)
                 res = conn.getresponse()
 
                 if res.status == 200:

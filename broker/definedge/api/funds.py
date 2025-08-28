@@ -23,20 +23,19 @@ def get_margin_data(auth_token):
         response_data = json.loads(data)
 
         # Transform to OpenAlgo format
-        if response_data.get('status') == 'SUCCESS':
-            margin_data = response_data.get('data', {})
-
+        # DefinedGe returns data directly in the response, not nested under 'data'
+        if response_data.get('status') == '200' or 'cash' in response_data:
             # Map DefinedGe margin fields to OpenAlgo format
             formatted_data = {
-                'availablecash': margin_data.get('available_cash', '0'),
-                'collateral': margin_data.get('collateral', '0'),
-                'm2munrealized': margin_data.get('unrealized_pnl', '0'),
-                'm2mrealized': margin_data.get('realized_pnl', '0'),
-                'openingbalance': margin_data.get('opening_balance', '0'),
-                'payin': margin_data.get('payin', '0'),
-                'payout': margin_data.get('payout', '0'),
-                'utiliseddebits': margin_data.get('utilized_margin', '0'),
-                'utilisedpayout': margin_data.get('utilized_payout', '0')
+                'availablecash': response_data.get('cash', '0'),
+                'collateral': response_data.get('collateral', '0'),
+                'm2munrealized': response_data.get('m2munrealized', '0'),
+                'm2mrealized': response_data.get('m2mrealized', '0'),
+                'openingbalance': response_data.get('cash', '0'),
+                'payin': response_data.get('payin', '0'),
+                'payout': response_data.get('payout', '0'),
+                'utiliseddebits': response_data.get('marginUsed', '0'),
+                'utilisedpayout': response_data.get('payout', '0')
             }
 
             return formatted_data
