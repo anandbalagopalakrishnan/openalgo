@@ -16,7 +16,13 @@
       "Bash(ls:*)",
       "Bash(uv run:*)",
       "Bash(curl:*)",
-      "Bash(mkdir:*)"
+      "Bash(chmod:*)",
+      "Bash(source:*)",
+      "Bash(.venv/Scripts/python.exe:*)",
+      "WebFetch(domain:docs.openalgo.in)",
+      "WebFetch(domain:tradingview.github.io)",
+      "Bash(npm install)",
+      "Bash(npm run build:*)"
     ],
     "deny": []
   }
