@@ -305,10 +305,17 @@ def delete_definedge_temp_data(output_path):
 def master_contract_download():
     """Download and process DefinedGe master contracts"""
     try:
-        # Get auth token for the first user (assuming single user setup)
-        auth_token = get_auth_token()
+        # Get the first user with DefinedGe broker from auth table
+        from database.auth_db import Auth
+        auth_record = Auth.query.filter_by(broker='definedge', is_revoked=False).first()
+        if not auth_record:
+            logger.error("No active DefinedGe auth record found for master contract download")
+            return False
+            
+        # Get auth token for the user
+        auth_token = get_auth_token(auth_record.name)
         if not auth_token:
-            logger.error("No auth token found for DefinedGe master contract download")
+            logger.error(f"No auth token found for user {auth_record.name}")
             return False
 
         # Create temp directory

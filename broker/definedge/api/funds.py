@@ -16,7 +16,7 @@ def get_margin_data(auth_token):
             'Content-Type': 'application/json'
         }
 
-        conn.request("GET", "/dart/v1/margin", '', headers)
+        conn.request("GET", "/dart/v1/limits", '', headers)
         res = conn.getresponse()
         data = res.read().decode("utf-8")
 

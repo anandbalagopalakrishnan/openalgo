@@ -31,14 +31,6 @@
                     </div>
 
                     <form action="/definedge/callback" method="POST" class="space-y-4">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                        <!-- Hidden fields for session data -->
-                        <input type="hidden" name="access_token" value="{{ para.access_token }}">
-                        <input type="hidden" name="token" value="{{ para.token }}">
-                        <input type="hidden" name="sid" value="{{ para.sid }}">
-                        <input type="hidden" name="hsServerId" value="{{ para.hsServerId }}">
-                        <input type="hidden" name="userid" value="{{ para.userid }}">
-
                         <div class="form-control">
                             <label class="label">
                                 <span class="label-text">OTP</span>

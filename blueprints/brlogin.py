@@ -400,9 +400,11 @@ def broker_callback(broker,para=None):
             return render_template('definedgeotp.html')
 
         elif request.method == 'POST':
+            api_token = get_broker_api_key()
+            api_secret = get_broker_api_secret()
             otp_code = request.form.get('otp')
 
-            auth_token, error_message = auth_function(otp_code)
+            auth_token, error_message = auth_function(api_token, api_secret, otp_code)
             forward_url = 'broker.html'
 
     else:
