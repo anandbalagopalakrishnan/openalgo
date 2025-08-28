@@ -218,3 +218,101 @@ def transform_tradebook_data(tradebook_data):
         transformed_data.append(transformed_trade)
         
     return transformed_data
+
+
+def map_position_data(position_data):
+    """
+    Processes and modifies position data from DefinedGe Securities.
+    
+    Parameters:
+    - position_data: A dictionary containing position data from DefinedGe API
+    
+    Returns:
+    - The modified position_data with updated 'tradingsymbol' fields
+    """
+    # Handle DefinedGe API response structure for positions
+    if isinstance(position_data, dict):
+        if position_data.get('status') == 'SUCCESS' and 'positions' in position_data:
+            positions = position_data['positions']
+        elif position_data.get('status') == 'ERROR':
+            logger.error(f"DefinedGe API error: {position_data.get('message', 'Unknown error')}")
+            return []
+        else:
+            # Handle case where data might be directly in the response
+            positions = position_data if isinstance(position_data, list) else []
+    else:
+        positions = position_data if position_data else []
+
+    if positions:
+        for position in positions:
+            # Extract the exchange and symbol for the current position
+            exchange = position.get('exchange', '')
+            symbol = position.get('tradingsymbol', '')
+            
+            # Convert broker symbol to OpenAlgo format
+            if symbol and exchange:
+                oa_symbol = get_oa_symbol(symbol=symbol, exchange=exchange)
+                if oa_symbol:
+                    position['tradingsymbol'] = oa_symbol
+                else:
+                    logger.info(f"Symbol {symbol} on exchange {exchange} not found. Keeping original.")
+                    
+    return positions
+
+
+def transform_positions_data(positions_data):
+    """
+    Transform DefinedGe positions data to OpenAlgo format.
+    
+    Parameters:
+    - positions_data: List of position dictionaries from DefinedGe API
+    
+    Returns:
+    - List of transformed position dictionaries
+    """
+    transformed_data = []
+
+    for position in positions_data:
+        if not isinstance(position, dict):
+            logger.warning(f"Expected a dict, but found a {type(position)}. Skipping this item.")
+            continue
+
+        # Ensure average_price is treated as a float, then format to a string with 2 decimal places
+        average_price = float(position.get('average_price', position.get('avg_price', 0.0)))
+        average_price_formatted = "{:.2f}".format(average_price)
+
+        # Calculate net quantity and other values
+        net_qty = int(position.get('net_quantity', position.get('netqty', 0)))
+        buy_qty = int(position.get('buy_quantity', position.get('buyqty', 0)))
+        sell_qty = int(position.get('sell_quantity', position.get('sellqty', 0)))
+        
+        # Calculate PnL values
+        realized_pnl = float(position.get('realized_pnl', position.get('rpnl', 0.0)))
+        unrealized_pnl = float(position.get('unrealized_pnl', position.get('pnl', 0.0)))
+        
+        # Get current market price (LTP)
+        ltp = float(position.get('ltp', position.get('lastPrice', 0.0)))
+        
+        # For closed positions (net_qty = 0), show realized P&L, otherwise show unrealized P&L
+        display_pnl = realized_pnl if net_qty == 0 else unrealized_pnl
+
+        transformed_position = {
+            "symbol": position.get('tradingsymbol', ''),
+            "exchange": position.get('exchange', ''),
+            "product": position.get('product_type', ''),  # DefinedGe uses 'product_type'
+            "quantity": str(net_qty),  # Template expects 'quantity' field
+            "netqty": str(net_qty),
+            "buyqty": str(buy_qty),
+            "sellqty": str(sell_qty),
+            "average_price": average_price_formatted,  # Template expects 'average_price' field
+            "avgprice": average_price_formatted,
+            "ltp": "{:.2f}".format(ltp),
+            "pnl": "{:.2f}".format(display_pnl),  # Show realized P&L for closed positions
+            "rpnl": "{:.2f}".format(realized_pnl),
+            "token": position.get('token', ''),
+            "lotsize": position.get('lotsize', position.get('lot_size', '1'))
+        }
+        
+        transformed_data.append(transformed_position)
+
+    return transformed_data
