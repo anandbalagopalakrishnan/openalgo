@@ -28,8 +28,8 @@ def yellow(text):
 
 class DefinedGeAuthTest:
     def __init__(self):
-        self.api_token = os.getenv('DEFINEDGE_API_TOKEN')
-        self.api_secret = os.getenv('DEFINEDGE_API_SECRET')
+        self.api_token = os.getenv('BROKER_API_KEY')
+        self.api_secret = os.getenv('BROKER_API_SECRET')
         self.test_results = []
         
     def log_result(self, test_name, success, message=""):
@@ -47,11 +47,11 @@ class DefinedGeAuthTest:
         print(f"{yellow('='*60)}")
         
         if not self.api_token:
-            self.log_result("Environment Check", False, "DEFINEDGE_API_TOKEN not set")
+            self.log_result("Environment Check", False, "BROKER_API_KEY not set")
             return False
             
         if not self.api_secret:
-            self.log_result("Environment Check", False, "DEFINEDGE_API_SECRET not set")
+            self.log_result("Environment Check", False, "BROKER_API_SECRET not set")
             return False
             
         self.log_result("Environment Check", True, "Credentials found")

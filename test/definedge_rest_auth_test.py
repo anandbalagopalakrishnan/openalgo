@@ -538,8 +538,8 @@ class TestDefinedgeRestAuthentication:
 def get_credentials_from_environment() -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """Get credentials from environment variables."""
     return (
-        os.getenv('DEFINEDGE_API_TOKEN'),
-        os.getenv('DEFINEDGE_API_SECRET'), 
+        os.getenv('BROKER_API_KEY'),
+        os.getenv('BROKER_API_SECRET'), 
         os.getenv('DEFINEDGE_TOTP')
     )
 

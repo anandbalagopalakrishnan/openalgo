@@ -9,8 +9,8 @@ Usage:
     python simple_auth_test.py
     
 Environment Variables:
-    DEFINEDGE_API_TOKEN - Your Definedge API token
-    DEFINEDGE_API_SECRET - Your Definedge API secret  
+    BROKER_API_KEY - Your Definedge API token
+    BROKER_API_SECRET - Your Definedge API secret  
     DEFINEDGE_TOTP - Optional: Your TOTP code (if not set, will prompt)
 """
 
@@ -46,8 +46,8 @@ def get_credentials() -> tuple[Optional[str], Optional[str], Optional[str]]:
         Tuple of (api_token, api_secret, totp)
     """
     # Try to get credentials from environment variables
-    api_token = os.getenv('DEFINEDGE_API_TOKEN')
-    api_secret = os.getenv('DEFINEDGE_API_SECRET')
+    api_token = os.getenv('BROKER_API_KEY')
+    api_secret = os.getenv('BROKER_API_SECRET')
     totp = os.getenv('DEFINEDGE_TOTP')
     
     # If not in environment, prompt user
@@ -163,8 +163,8 @@ def print_usage_info():
     print("\n2. Enable TOTP at:")
     print("   https://myaccount.definedgesecurities.com/security")
     print("\n3. Set environment variables (optional):")
-    print("   export DEFINEDGE_API_TOKEN='your_token_here'")
-    print("   export DEFINEDGE_API_SECRET='your_secret_here'")
+    print("   export BROKER_API_KEY='your_token_here'")
+    print("   export BROKER_API_SECRET='your_secret_here'")
     print("   export DEFINEDGE_TOTP='your_6_digit_totp'  # Optional")
     print("\n4. Install the SDK if not already installed:")
     print("   pip install pyintegrate")

@@ -344,8 +344,8 @@ def main():
     print("=" * 80)
     
     # Get credentials from environment variables or user input
-    api_token = os.getenv('DEFINEDGE_API_TOKEN')
-    api_secret = os.getenv('DEFINEDGE_API_SECRET')
+    api_token = os.getenv('BROKER_API_KEY')
+    api_secret = os.getenv('BROKER_API_SECRET')
     totp = os.getenv('DEFINEDGE_TOTP')
     
     if not api_token:
