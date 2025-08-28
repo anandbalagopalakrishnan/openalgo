@@ -13,7 +13,7 @@ from colorama import Fore, Style, init as colorama_init
 # Add the project root to Python path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from broker.definedge.api.auth_api import authenticate_broker, login_step1, login_step2, login_step3
+from broker.definedge.api.auth_api import authenticate_broker, login_step1, login_step2
 
 colorama_init(autoreset=True)
 
@@ -89,8 +89,8 @@ class DefinedGeAuthTest:
             return None
             
     def test_step2_otp_verification(self, step1_response, otp):
-        """Test Step 2: OTP verification"""
-        print(f"\n{yellow('Testing Step 2: OTP Verification')}")
+        """Test Step 2: OTP verification with auth code"""
+        print(f"\n{yellow('Testing Step 2: OTP Verification with Auth Code')}")
         
         if not step1_response:
             self.log_result("Step 2 - Prerequisites", False, "Step 1 failed")
@@ -114,53 +114,27 @@ class DefinedGeAuthTest:
                 
             self.log_result("Step 2 - API Call", True, "Response received")
             
-            # Check for JWT token
-            if 'access_token' in response:
-                self.log_result("Step 2 - JWT Token", True, "Access token received")
-                return response
+            # Check response status
+            if response.get('stat') == 'Ok':
+                self.log_result("Step 2 - Status", True, "Authentication successful")
             else:
-                self.log_result("Step 2 - JWT Token", False, "Access token not found")
-                print(f"Response keys: {list(response.keys())}")
+                error_msg = response.get('emsg', 'Unknown error')
+                self.log_result("Step 2 - Status", False, f"Auth failed: {error_msg}")
                 return None
-                
-        except Exception as e:
-            self.log_result("Step 2 - Exception", False, str(e))
-            return None
             
-    def test_step3_session_key(self, jwt_response):
-        """Test Step 3: Get session key"""
-        print(f"\n{yellow('Testing Step 3: Session Key Exchange')}")
-        
-        if not jwt_response:
-            self.log_result("Step 3 - Prerequisites", False, "Step 2 failed")
-            return None
-            
-        try:
-            response = login_step3(jwt_response)
-            
-            if response is None:
-                self.log_result("Step 3 - API Call", False, "No response received")
-                return None
-                
-            if not isinstance(response, dict):
-                self.log_result("Step 3 - Response Format", False, "Invalid response format")
-                return None
-                
-            self.log_result("Step 3 - API Call", True, "Response received")
-            
-            # Check for session key
+            # Check for session keys
             api_session_key = response.get('api_session_key')
             susertoken = response.get('susertoken')
             
             if api_session_key:
-                self.log_result("Step 3 - Session Key", True, f"Key: {api_session_key[:10]}...")
+                self.log_result("Step 2 - Session Key", True, f"Key: {api_session_key[:10]}...")
             else:
-                self.log_result("Step 3 - Session Key", False, "Session key not found")
+                self.log_result("Step 2 - Session Key", False, "Session key not found")
                 
             if susertoken:
-                self.log_result("Step 3 - User Token", True, f"Token: {susertoken[:10]}...")
+                self.log_result("Step 2 - User Token", True, f"Token: {susertoken[:10]}...")
             else:
-                self.log_result("Step 3 - User Token", False, "User token not found")
+                self.log_result("Step 2 - User Token", False, "User token not found")
                 
             if api_session_key and susertoken:
                 return response
@@ -169,8 +143,9 @@ class DefinedGeAuthTest:
                 return None
                 
         except Exception as e:
-            self.log_result("Step 3 - Exception", False, str(e))
+            self.log_result("Step 2 - Exception", False, str(e))
             return None
+            
             
     def test_full_authentication(self, otp):
         """Test the complete authentication flow"""
@@ -217,11 +192,8 @@ class DefinedGeAuthTest:
                 step2_response = self.test_step2_otp_verification(step1_response, otp)
                 
                 if step2_response:
-                    step3_response = self.test_step3_session_key(step2_response)
-                    
-                    if step3_response:
-                        # Test full flow
-                        self.test_full_authentication(otp)
+                    # Test full flow
+                    self.test_full_authentication(otp)
             else:
                 print(red("No OTP provided, skipping remaining tests"))
                 

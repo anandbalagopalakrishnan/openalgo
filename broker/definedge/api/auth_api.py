@@ -1,16 +1,16 @@
 import http.client
 import json
 import urllib.parse
+from hashlib import sha256
 from utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 def authenticate_broker(api_token, api_secret, otp):
     """
-    Authenticate with DefinedGe Securities using 3-step process:
+    Authenticate with DefinedGe Securities using 2-step process:
     1. Login with API token/secret to get OTP token
-    2. Verify OTP to get JWT
-    3. Exchange JWT for session key
+    2. Verify OTP with auth code to get session keys
     """
     try:
         # Step 1: Login with API credentials to get OTP token
@@ -22,15 +22,15 @@ def authenticate_broker(api_token, api_secret, otp):
         if not otp_token:
             return None, "Failed to get OTP token"
 
-        # Step 2: Verify OTP to get JWT
-        jwt_response = login_step2(otp_token, otp, api_secret)
-        if not jwt_response:
+        # Step 2: Verify OTP with auth code to get session keys
+        session_response = login_step2(otp_token, otp, api_secret)
+        if not session_response:
             return None, "Failed to verify OTP"
 
-        # Step 3: Exchange JWT for session key
-        session_response = login_step3(jwt_response)
-        if not session_response:
-            return None, "Failed to get session key"
+        # Check response status
+        if session_response.get('stat') != 'Ok':
+            error_msg = session_response.get('emsg', 'Unknown authentication error')
+            return None, f"Authentication failed: {error_msg}"
 
         api_session_key = session_response.get('api_session_key')
         susertoken = session_response.get('susertoken')
@@ -70,25 +70,27 @@ def login_step1(api_token, api_secret):
         logger.error(f"Step 1 error: {e}")
         return None
 
-def login_step2(otp_token, otp, client_secret):
-    """Step 2: Verify OTP to get JWT"""
+def login_step2(otp_token, otp, api_secret):
+    """Step 2: Verify OTP with auth code to get session keys"""
     try:
         conn = http.client.HTTPSConnection("signin.definedgesecurities.com")
 
+        # Calculate authentication code using SHA256
+        auth_string = f"{otp_token}{otp}{api_secret}"
+        auth_code = sha256(auth_string.encode("utf-8")).hexdigest()
+
         payload = {
-            "client_id": "TRTP",
-            "grant_type": "password",
-            "client_secret": client_secret,
             "otp_token": otp_token,
-            "otp": otp
+            "otp": otp,
+            "ac": auth_code
         }
 
         headers = {
-            'Content-Type': 'application/x-www-form-urlencoded'
+            'Content-Type': 'application/json'
         }
 
-        encoded_payload = urllib.parse.urlencode(payload)
-        conn.request("POST", "/auth/realms/debroking/dsbpkc/token", encoded_payload, headers)
+        json_payload = json.dumps(payload)
+        conn.request("POST", "/auth/realms/debroking/dsbpkc/token", json_payload, headers)
 
         res = conn.getresponse()
         data = res.read().decode("utf-8")
@@ -103,27 +105,3 @@ def login_step2(otp_token, otp, client_secret):
         logger.error(f"Step 2 error: {e}")
         return None
 
-def login_step3(jwt_data):
-    """Step 3: Exchange JWT for session key"""
-    try:
-        conn = http.client.HTTPSConnection("integrate.definedgesecurities.com")
-
-        headers = {
-            'Content-Type': 'application/json'
-        }
-
-        payload = json.dumps(jwt_data)
-        conn.request("POST", "/dart/v1/token", payload, headers)
-
-        res = conn.getresponse()
-        data = res.read().decode("utf-8")
-
-        if res.status == 200:
-            return json.loads(data)
-        else:
-            logger.error(f"Step 3 failed: {data}")
-            return None
-
-    except Exception as e:
-        logger.error(f"Step 3 error: {e}")
-        return None
