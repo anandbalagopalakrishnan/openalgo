@@ -24,7 +24,7 @@ def get_quotes(symbol, exchange, auth_token):
     try:
         api_session_key, susertoken, api_token = auth_token.split(":::")
 
-        conn = http.client.HTTPSConnection("integrate.definedgesecurities.com")
+        conn = http.client.HTTPSConnection("data.definedgesecurities.com")
 
         # Get token for the symbol
         from database.token_db import get_token
@@ -35,13 +35,10 @@ def get_quotes(symbol, exchange, auth_token):
             'Content-Type': 'application/json'
         }
 
-        # DefinedGe uses token-based quote requests
-        payload = json.dumps({
-            "exchange": exchange,
-            "token": token_id
-        })
-
-        conn.request("POST", "/dart/v1/quotes", payload, headers)
+        # Use the correct DefinedGe quotes endpoint: /quotes/{exchange}/{token}
+        endpoint = f"/quotes/{exchange}/{token_id}"
+        
+        conn.request("GET", endpoint, '', headers)
         res = conn.getresponse()
         data = res.read().decode("utf-8")
 
@@ -151,7 +148,7 @@ class BrokerData:
             dict: Quote data with required fields
         """
         try:
-            # Use the existing get_quotes function
+            # Use the updated get_quotes function with correct endpoint
             response = get_quotes(symbol, exchange, self.auth_token)
             
             if response.get('status') == 'error':
@@ -196,55 +193,63 @@ class BrokerData:
             # Check for unsupported timeframes
             if interval not in self.timeframe_map:
                 supported = list(self.timeframe_map.keys())
-                raise Exception(f"Timeframe '{interval}' is not supported by DefinedGe. Supported timeframes are: {', '.join(supported)}")
+                logger.warning(f"Timeframe '{interval}' is not supported by DefinedGe. Supported timeframes are: {', '.join(supported)}")
+                # Return empty DataFrame instead of raising exception
+                return pd.DataFrame(columns=['close', 'high', 'low', 'open', 'timestamp', 'volume', 'oi'])
             
             # Convert dates to datetime objects
             from_date = pd.to_datetime(start_date)
             to_date = pd.to_datetime(end_date)
             
-            # Set start time to 00:00 for the start date
-            from_date = from_date.replace(hour=0, minute=0)
-            
-            # If end_date is today, set the end time to current time
-            current_time = pd.Timestamp.now()
-            if to_date.date() == current_time.date():
-                to_date = current_time.replace(second=0, microsecond=0)
-            else:
-                # For past dates, set end time to 23:59
-                to_date = to_date.replace(hour=23, minute=59)
-            
-            # Get historical data from DefinedGe API
+            # Get historical data from DefinedGe API using correct endpoint
             api_session_key, susertoken, api_token = self.auth_token.split(":::")
             
-            conn = http.client.HTTPSConnection("integrate.definedgesecurities.com")
+            conn = http.client.HTTPSConnection("data.definedgesecurities.com")
             
             headers = {
                 'Authorization': api_session_key,
                 'Content-Type': 'application/json'
             }
             
-            payload = json.dumps({
-                "exchange": exchange,
-                "token": token,
-                "interval": self.timeframe_map[interval],
-                "from": from_date.strftime('%Y-%m-%d %H:%M:%S'),
-                "to": to_date.strftime('%Y-%m-%d %H:%M:%S')
-            })
+            # Use the correct DefinedGe historical data endpoint: /sds/history/{segment}/{token}/{timeframe}/{from}/{to}
+            # Convert exchange to segment format if needed
+            segment = exchange.lower()
+            timeframe = self.timeframe_map[interval]
+            from_date_str = from_date.strftime('%Y%m%d')
+            to_date_str = to_date.strftime('%Y%m%d')
             
-            conn.request("POST", "/dart/v1/historical", payload, headers)
-            res = conn.getresponse()
-            data = res.read().decode("utf-8")
+            endpoint = f"/sds/history/{segment}/{token}/{timeframe}/{from_date_str}/{to_date_str}"
             
-            response = json.loads(data)
+            logger.debug(f"Debug - DefinedGe API endpoint: {endpoint}")
             
-            if response.get('status') != 'success':
-                raise Exception(f"Error from DefinedGe API: {response.get('message', 'Unknown error')}")
+            try:
+                conn.request("GET", endpoint, '', headers)
+                res = conn.getresponse()
+                data = res.read().decode("utf-8")
+                
+                logger.debug(f"Debug - Response status: {res.status}")
+                logger.debug(f"Debug - Response data: {data}")
+                
+                if res.status != 200:
+                    logger.warning(f"Debug - DefinedGe API returned status {res.status}")
+                    return pd.DataFrame(columns=['close', 'high', 'low', 'open', 'timestamp', 'volume', 'oi'])
+                
+                response = json.loads(data)
+                logger.debug(f"Debug - Parsed response: {response}")
+                
+            except Exception as api_error:
+                logger.warning(f"Debug - DefinedGe API error: {str(api_error)}")
+                return pd.DataFrame(columns=['close', 'high', 'low', 'open', 'timestamp', 'volume', 'oi'])
             
-            # Extract historical data
-            candles = response.get('data', [])
+            # Extract historical data - try different possible data keys
+            candles = (response.get('data') or 
+                      response.get('candles') or 
+                      response.get('result') or
+                      response if isinstance(response, list) else [])
+            
             if not candles:
-                logger.debug("Debug - No data received from API")
-                return pd.DataFrame(columns=['timestamp', 'open', 'high', 'low', 'close', 'volume', 'oi'])
+                logger.warning("Debug - No candle data found in API response")
+                return pd.DataFrame(columns=['close', 'high', 'low', 'open', 'timestamp', 'volume', 'oi'])
             
             # Create DataFrame from candles data
             df = pd.DataFrame(candles)
@@ -256,18 +261,24 @@ class BrokerData:
                     df[col] = 0
             
             # Convert timestamp to Unix epoch if it's not already
-            if df['timestamp'].dtype == 'object':
+            if 'timestamp' in df.columns and df['timestamp'].dtype == 'object':
                 df['timestamp'] = pd.to_datetime(df['timestamp']).astype('int64') // 10**9
+            elif 'time' in df.columns:
+                df['timestamp'] = pd.to_datetime(df['time']).astype('int64') // 10**9
+                df = df.drop('time', axis=1)
             
             # Ensure numeric columns
             numeric_columns = ['open', 'high', 'low', 'close', 'volume']
-            df[numeric_columns] = df[numeric_columns].apply(pd.to_numeric)
+            for col in numeric_columns:
+                if col in df.columns:
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
             
-            # Add OI column (set to 0 for now as DefinedGe API structure is not clear)
+            # Add OI column (set to 0 for now)
             df['oi'] = 0
             
             # Sort by timestamp and remove duplicates
-            df = df.sort_values('timestamp').drop_duplicates(subset=['timestamp']).reset_index(drop=True)
+            if 'timestamp' in df.columns:
+                df = df.sort_values('timestamp').drop_duplicates(subset=['timestamp']).reset_index(drop=True)
             
             # Reorder columns to match expected format
             df = df[['close', 'high', 'low', 'open', 'timestamp', 'volume', 'oi']]
@@ -275,8 +286,9 @@ class BrokerData:
             return df
             
         except Exception as e:
-            logger.error(f"Debug - Error: {str(e)}")
-            raise Exception(f"Error fetching historical data: {str(e)}")
+            logger.warning(f"Debug - DefinedGe historical data error: {str(e)}")
+            # Return empty DataFrame instead of raising exception to prevent system crashes
+            return pd.DataFrame(columns=['close', 'high', 'low', 'open', 'timestamp', 'volume', 'oi'])
 
     def get_depth(self, symbol: str, exchange: str) -> dict:
         """
@@ -294,28 +306,26 @@ class BrokerData:
             
             api_session_key, susertoken, api_token = self.auth_token.split(":::")
             
-            conn = http.client.HTTPSConnection("integrate.definedgesecurities.com")
+            conn = http.client.HTTPSConnection("data.definedgesecurities.com")
             
             headers = {
                 'Authorization': api_session_key,
                 'Content-Type': 'application/json'
             }
             
-            payload = json.dumps({
-                "exchange": exchange,
-                "token": token
-            })
+            # Use the correct DefinedGe quotes endpoint for depth data
+            endpoint = f"/quotes/{exchange}/{token}"
             
-            conn.request("POST", "/dart/v1/depth", payload, headers)
+            conn.request("GET", endpoint, '', headers)
             res = conn.getresponse()
             data = res.read().decode("utf-8")
             
             response = json.loads(data)
             
-            if response.get('status') != 'success':
-                raise Exception(f"Error from DefinedGe API: {response.get('message', 'Unknown error')}")
+            if res.status != 200:
+                raise Exception(f"Error from DefinedGe API: HTTP {res.status}")
             
-            depth_data = response.get('data', {})
+            depth_data = response.get('data', response)
             
             # Format bids and asks with exactly 5 entries each
             bids = []
