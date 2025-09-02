@@ -278,11 +278,49 @@ def transform_positions_data(positions_data):
             continue
 
         # Ensure average_price is treated as a float, then format to a string with 2 decimal places
-        average_price = float(position.get('average_price', position.get('avg_price', 0.0)))
+        # DefinedGe uses different field names for average price in positions
+        # For closed positions (net_qty = 0), net_averageprice is 0.00, so use total_buy_avg or total_sell_avg
+        net_qty = int(position.get('net_quantity', position.get('netqty', 0)))
+        
+        if net_qty == 0:
+            # For closed positions, use the appropriate total average price
+            buy_avg = float(position.get('total_buy_avg', position.get('day_buy_avg', 0.0)))
+            sell_avg = float(position.get('total_sell_avg', position.get('day_sell_avg', 0.0)))
+            # Use the non-zero average price (the one that had trades)
+            average_price = buy_avg if buy_avg > 0 else sell_avg
+        else:
+            # For open positions, DefinedGe provides net_averageprice which is the weighted average
+            # of both day trades and carry forward positions
+            average_price = float(position.get('net_averageprice', 0.0))
+            
+            # If net_averageprice is 0, try to calculate from components
+            if average_price == 0.0:
+                day_buy_qty = int(position.get('day_buy_qty', 0))
+                day_sell_qty = int(position.get('day_sell_qty', 0))
+                carry_buy_qty = int(position.get('carry_buy_qty', 0))
+                carry_sell_qty = int(position.get('carry_sell_qty', 0))
+                
+                day_buy_avg = float(position.get('day_buy_avg', 0.0))
+                day_sell_avg = float(position.get('day_sell_avg', 0.0))
+                carry_buy_avg = float(position.get('carry_buy_avg', 0.0))
+                carry_sell_avg = float(position.get('carry_sell_avg', 0.0))
+                
+                # Calculate weighted average based on quantities and prices
+                total_buy_value = (day_buy_qty * day_buy_avg) + (carry_buy_qty * carry_buy_avg)
+                total_sell_value = (day_sell_qty * day_sell_avg) + (carry_sell_qty * carry_sell_avg)
+                total_buy_qty = day_buy_qty + carry_buy_qty
+                total_sell_qty = day_sell_qty + carry_sell_qty
+                
+                if net_qty > 0:  # Net long position
+                    if total_buy_qty > 0:
+                        average_price = total_buy_value / total_buy_qty
+                elif net_qty < 0:  # Net short position
+                    if total_sell_qty > 0:
+                        average_price = total_sell_value / total_sell_qty
+        
         average_price_formatted = "{:.2f}".format(average_price)
 
-        # Calculate net quantity and other values
-        net_qty = int(position.get('net_quantity', position.get('netqty', 0)))
+        # Calculate other quantity values (net_qty already calculated above)
         buy_qty = int(position.get('buy_quantity', position.get('buyqty', 0)))
         sell_qty = int(position.get('sell_quantity', position.get('sellqty', 0)))
         
