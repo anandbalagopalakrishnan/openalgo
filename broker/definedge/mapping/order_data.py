@@ -330,10 +330,10 @@ def map_portfolio_data(portfolio_data):
     """
     # Handle DefinedGe API response structure for portfolio/holdings
     if isinstance(portfolio_data, dict):
-        if portfolio_data.get('status') == 'SUCCESS' and 'holdings' in portfolio_data:
-            data = portfolio_data
-        elif portfolio_data.get('data') and 'holdings' in portfolio_data['data']:
-            data = portfolio_data['data']
+        if portfolio_data.get('status') == 'SUCCESS' and 'data' in portfolio_data:
+            # DefinedGe returns holdings in 'data' array
+            holdings_list = portfolio_data['data']
+            data = {'holdings': holdings_list}
         elif portfolio_data.get('status') == 'ERROR':
             logger.error(f"DefinedGe API error: {portfolio_data.get('message', 'Unknown error')}")
             return {}
@@ -350,17 +350,29 @@ def map_portfolio_data(portfolio_data):
 
     # Process holdings and update symbols
     for holding in data['holdings']:
-        # Extract the exchange and symbol for the current holding
-        exchange = holding.get('exchange', '')
-        symbol = holding.get('tradingsymbol', '')
+        # DefinedGe API returns tradingsymbol as an array of objects
+        tradingsymbol_array = holding.get('tradingsymbol', [])
         
-        # Convert broker symbol to OpenAlgo format
-        if symbol and exchange:
-            oa_symbol = get_oa_symbol(symbol=symbol, exchange=exchange)
-            if oa_symbol:
-                holding['tradingsymbol'] = oa_symbol
+        if tradingsymbol_array and isinstance(tradingsymbol_array, list):
+            # Use the first tradingsymbol entry (usually NSE)
+            first_symbol_obj = tradingsymbol_array[0]
+            exchange = first_symbol_obj.get('exchange', '')
+            symbol = first_symbol_obj.get('tradingsymbol', '')
+            
+            # Add exchange and symbol fields to holding for compatibility
+            holding['exchange'] = exchange
+            holding['symbol'] = symbol
+            
+            # Convert broker symbol to OpenAlgo format
+            if symbol and exchange:
+                oa_symbol = get_oa_symbol(symbol=symbol, exchange=exchange)
+                if oa_symbol:
+                    holding['tradingsymbol'] = oa_symbol
+                else:
+                    holding['tradingsymbol'] = symbol
+                    logger.info(f"Symbol {symbol} on exchange {exchange} not found. Keeping original.")
             else:
-                logger.info(f"Symbol {symbol} on exchange {exchange} not found. Keeping original.")
+                holding['tradingsymbol'] = symbol
                 
     return data
 
@@ -435,27 +447,38 @@ def transform_holdings_data(holdings_data):
             logger.warning(f"Expected a dict, but found a {type(holding)}. Skipping this item.")
             continue
             
-        # Calculate PnL values
-        quantity = float(holding.get('quantity', 0))
-        avg_price = float(holding.get('average_price', holding.get('avg_price', 0)))
-        ltp = float(holding.get('ltp', holding.get('lastPrice', 0)))
+        # Extract DefinedGe specific fields
+        dp_qty = float(holding.get('dp_qty', 0))
+        avg_buy_price = float(holding.get('avg_buy_price', 0))
         
-        investment_value = quantity * avg_price
-        current_value = quantity * ltp
+        # Get symbol and exchange (already processed by map_portfolio_data)
+        symbol = holding.get('tradingsymbol', '')
+        exchange = holding.get('exchange', '')
+        
+        # For DefinedGe, we need to get current LTP from market data
+        # For now, use avg_buy_price as placeholder for LTP
+        ltp = avg_buy_price  # This should be updated with real-time price
+        
+        # Calculate PnL values
+        investment_value = dp_qty * avg_buy_price
+        current_value = dp_qty * ltp
         pnl = current_value - investment_value
         pnl_percent = (pnl / investment_value * 100) if investment_value > 0 else 0
         
         transformed_holding = {
-            "symbol": holding.get('tradingsymbol', ''),
-            "exchange": holding.get('exchange', ''),
-            "quantity": int(quantity),
-            "product": holding.get('product_type', holding.get('product', '')),
+            "symbol": symbol,
+            "exchange": exchange,
+            "quantity": int(dp_qty),
+            "product": "CNC",  # DefinedGe holdings are typically delivery
             "pnl": round(pnl, 2),
             "pnlpercent": round(pnl_percent, 2),
-            "average_price": round(avg_price, 2),
+            "average_price": round(avg_buy_price, 2),
             "ltp": round(ltp, 2),
             "investment_value": round(investment_value, 2),
-            "current_value": round(current_value, 2)
+            "current_value": round(current_value, 2),
+            "collateral_qty": holding.get('collateral_qty', '0'),
+            "t1_qty": holding.get('t1_qty', '0'),
+            "haircut": holding.get('haircut', '0')
         }
         
         transformed_data.append(transformed_holding)
