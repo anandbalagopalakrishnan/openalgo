@@ -204,26 +204,35 @@ class BrokerData:
             # Get historical data from DefinedGe API using correct endpoint
             api_session_key, susertoken, api_token = self.auth_token.split(":::")
             
-            conn = http.client.HTTPSConnection("data.definedgesecurities.com")
-            
             headers = {
                 'Authorization': api_session_key,
                 'Content-Type': 'application/json'
             }
             
-            # Use the correct DefinedGe historical data endpoint: /sds/history/{segment}/{token}/{timeframe}/{from}/{to}
-            # Convert exchange to segment format if needed
-            segment = exchange.lower()
+            # Use the correct DefinedGe historical data endpoint format
+            # Based on API documentation: POST request with JSON payload
             timeframe = self.timeframe_map[interval]
-            from_date_str = from_date.strftime('%Y%m%d')
-            to_date_str = to_date.strftime('%Y%m%d')
+            from_date_str = from_date.strftime('%Y-%m-%d')
+            to_date_str = to_date.strftime('%Y-%m-%d')
             
-            endpoint = f"/sds/history/{segment}/{token}/{timeframe}/{from_date_str}/{to_date_str}"
+            # Prepare payload for historical data request
+            payload = json.dumps({
+                "exchange": exchange,
+                "tradingsymbol": br_symbol,
+                "timeframe": timeframe,
+                "from": from_date_str,
+                "to": to_date_str
+            })
+            
+            # Use POST request to /dart/v1/history endpoint
+            endpoint = "/dart/v1/history"
             
             logger.debug(f"Debug - DefinedGe API endpoint: {endpoint}")
+            logger.debug(f"Debug - Payload: {payload}")
             
             try:
-                conn.request("GET", endpoint, '', headers)
+                conn = http.client.HTTPSConnection("integrate.definedgesecurities.com")
+                conn.request("POST", endpoint, payload, headers)
                 res = conn.getresponse()
                 data = res.read().decode("utf-8")
                 
@@ -241,44 +250,42 @@ class BrokerData:
                 logger.warning(f"Debug - DefinedGe API error: {str(api_error)}")
                 return pd.DataFrame(columns=['close', 'high', 'low', 'open', 'timestamp', 'volume', 'oi'])
             
-            # Extract historical data - try different possible data keys
-            candles = (response.get('data') or 
-                      response.get('candles') or 
-                      response.get('result') or
-                      response if isinstance(response, list) else [])
+            # Check if response indicates success
+            if response.get('status') != 'SUCCESS':
+                error_msg = response.get('message', 'Unknown error from DefinedGe API')
+                logger.warning(f"Debug - DefinedGe API error: {error_msg}")
+                return pd.DataFrame(columns=['close', 'high', 'low', 'open', 'timestamp', 'volume', 'oi'])
+            
+            # Extract historical data from DefinedGe response format
+            candles = response.get('data', [])
             
             if not candles:
                 logger.warning("Debug - No candle data found in API response")
                 return pd.DataFrame(columns=['close', 'high', 'low', 'open', 'timestamp', 'volume', 'oi'])
             
-            # Create DataFrame from candles data
-            df = pd.DataFrame(candles)
+            # DefinedGe returns data as array of arrays: [timestamp, open, high, low, close, volume]
+            df_data = []
+            for candle in candles:
+                if len(candle) >= 6:  # Ensure we have all required fields
+                    df_data.append({
+                        'timestamp': int(candle[0]),  # Unix timestamp
+                        'open': float(candle[1]),
+                        'high': float(candle[2]),
+                        'low': float(candle[3]),
+                        'close': float(candle[4]),
+                        'volume': int(candle[5]),
+                        'oi': 0  # DefinedGe doesn't provide OI in historical data
+                    })
             
-            # Ensure we have the required columns
-            required_columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
-            for col in required_columns:
-                if col not in df.columns:
-                    df[col] = 0
+            if not df_data:
+                logger.warning("Debug - No valid candle data after processing")
+                return pd.DataFrame(columns=['close', 'high', 'low', 'open', 'timestamp', 'volume', 'oi'])
             
-            # Convert timestamp to Unix epoch if it's not already
-            if 'timestamp' in df.columns and df['timestamp'].dtype == 'object':
-                df['timestamp'] = pd.to_datetime(df['timestamp']).astype('int64') // 10**9
-            elif 'time' in df.columns:
-                df['timestamp'] = pd.to_datetime(df['time']).astype('int64') // 10**9
-                df = df.drop('time', axis=1)
-            
-            # Ensure numeric columns
-            numeric_columns = ['open', 'high', 'low', 'close', 'volume']
-            for col in numeric_columns:
-                if col in df.columns:
-                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-            
-            # Add OI column (set to 0 for now)
-            df['oi'] = 0
+            # Create DataFrame
+            df = pd.DataFrame(df_data)
             
             # Sort by timestamp and remove duplicates
-            if 'timestamp' in df.columns:
-                df = df.sort_values('timestamp').drop_duplicates(subset=['timestamp']).reset_index(drop=True)
+            df = df.sort_values('timestamp').drop_duplicates(subset=['timestamp']).reset_index(drop=True)
             
             # Reorder columns to match expected format
             df = df[['close', 'high', 'low', 'open', 'timestamp', 'volume', 'oi']]
