@@ -210,29 +210,31 @@ class BrokerData:
             }
             
             # Use the correct DefinedGe historical data endpoint format
-            # Based on API documentation: POST request with JSON payload
-            timeframe = self.timeframe_map[interval]
-            from_date_str = from_date.strftime('%Y-%m-%d')
-            to_date_str = to_date.strftime('%Y-%m-%d')
+            # GET https://data.definedgesecurities.com/sds/history/{segment}/{token}/{timeframe}/{from}/{to}
             
-            # Prepare payload for historical data request
-            payload = json.dumps({
-                "exchange": exchange,
-                "tradingsymbol": br_symbol,
-                "timeframe": timeframe,
-                "from": from_date_str,
-                "to": to_date_str
-            })
+            # Map timeframe to DefinedGe format
+            if interval == 'D':
+                timeframe = 'day'
+            elif interval.endswith('m'):
+                timeframe = 'minute'
+            else:
+                timeframe = 'minute'  # Default to minute for other intervals
             
-            # Use POST request to /dart/v1/history endpoint
-            endpoint = "/dart/v1/history"
+            # Format dates as ddMMyyyyHHmm
+            from_date_str = from_date.strftime('%d%m%Y0915')
+            to_date_str = to_date.strftime('%d%m%Y1530')
+            
+            # Convert exchange to segment format
+            segment = exchange.upper()
+            
+            # Build the endpoint URL
+            endpoint = f"/sds/history/{segment}/{token}/{timeframe}/{from_date_str}/{to_date_str}"
             
             logger.debug(f"Debug - DefinedGe API endpoint: {endpoint}")
-            logger.debug(f"Debug - Payload: {payload}")
             
             try:
-                conn = http.client.HTTPSConnection("integrate.definedgesecurities.com")
-                conn.request("POST", endpoint, payload, headers)
+                conn = http.client.HTTPSConnection("data.definedgesecurities.com")
+                conn.request("GET", endpoint, '', headers)
                 res = conn.getresponse()
                 data = res.read().decode("utf-8")
                 
@@ -243,54 +245,57 @@ class BrokerData:
                     logger.warning(f"Debug - DefinedGe API returned status {res.status}")
                     return pd.DataFrame(columns=['close', 'high', 'low', 'open', 'timestamp', 'volume', 'oi'])
                 
-                response = json.loads(data)
-                logger.debug(f"Debug - Parsed response: {response}")
+                # Parse CSV response (no headers)
+                # Format: Dateandtime, Open Price, High Price, Low Price, Close, Volume, Open Interest
+                lines = data.strip().split('\n')
+                df_data = []
+                
+                for line in lines:
+                    if line.strip():
+                        parts = line.split(',')
+                        if len(parts) >= 6:
+                            try:
+                                # Parse datetime (ddMMyyyyHHmm format)
+                                dt_str = parts[0].strip()
+                                if len(dt_str) >= 12:
+                                    dt = pd.to_datetime(dt_str, format='%d%m%Y%H%M')
+                                    timestamp = int(dt.timestamp())
+                                else:
+                                    continue
+                                
+                                df_data.append({
+                                    'timestamp': timestamp,
+                                    'open': float(parts[1]),
+                                    'high': float(parts[2]),
+                                    'low': float(parts[3]),
+                                    'close': float(parts[4]),
+                                    'volume': int(float(parts[5])),
+                                    'oi': int(float(parts[6])) if len(parts) > 6 else 0
+                                })
+                            except (ValueError, IndexError) as e:
+                                logger.debug(f"Debug - Skipping invalid line: {line}, error: {e}")
+                                continue
+                
+                if not df_data:
+                    logger.warning("Debug - No valid data found in CSV response")
+                    return pd.DataFrame(columns=['close', 'high', 'low', 'open', 'timestamp', 'volume', 'oi'])
+                
+                # Create DataFrame
+                df = pd.DataFrame(df_data)
+                
+                # Sort by timestamp and remove duplicates
+                df = df.sort_values('timestamp').drop_duplicates(subset=['timestamp']).reset_index(drop=True)
+                
+                # Reorder columns to match expected format
+                df = df[['close', 'high', 'low', 'open', 'timestamp', 'volume', 'oi']]
+                
+                logger.debug(f"Debug - Successfully parsed {len(df)} candles")
+                return df
                 
             except Exception as api_error:
                 logger.warning(f"Debug - DefinedGe API error: {str(api_error)}")
                 return pd.DataFrame(columns=['close', 'high', 'low', 'open', 'timestamp', 'volume', 'oi'])
             
-            # Check if response indicates success
-            if response.get('status') != 'SUCCESS':
-                error_msg = response.get('message', 'Unknown error from DefinedGe API')
-                logger.warning(f"Debug - DefinedGe API error: {error_msg}")
-                return pd.DataFrame(columns=['close', 'high', 'low', 'open', 'timestamp', 'volume', 'oi'])
-            
-            # Extract historical data from DefinedGe response format
-            candles = response.get('data', [])
-            
-            if not candles:
-                logger.warning("Debug - No candle data found in API response")
-                return pd.DataFrame(columns=['close', 'high', 'low', 'open', 'timestamp', 'volume', 'oi'])
-            
-            # DefinedGe returns data as array of arrays: [timestamp, open, high, low, close, volume]
-            df_data = []
-            for candle in candles:
-                if len(candle) >= 6:  # Ensure we have all required fields
-                    df_data.append({
-                        'timestamp': int(candle[0]),  # Unix timestamp
-                        'open': float(candle[1]),
-                        'high': float(candle[2]),
-                        'low': float(candle[3]),
-                        'close': float(candle[4]),
-                        'volume': int(candle[5]),
-                        'oi': 0  # DefinedGe doesn't provide OI in historical data
-                    })
-            
-            if not df_data:
-                logger.warning("Debug - No valid candle data after processing")
-                return pd.DataFrame(columns=['close', 'high', 'low', 'open', 'timestamp', 'volume', 'oi'])
-            
-            # Create DataFrame
-            df = pd.DataFrame(df_data)
-            
-            # Sort by timestamp and remove duplicates
-            df = df.sort_values('timestamp').drop_duplicates(subset=['timestamp']).reset_index(drop=True)
-            
-            # Reorder columns to match expected format
-            df = df[['close', 'high', 'low', 'open', 'timestamp', 'volume', 'oi']]
-            
-            return df
             
         except Exception as e:
             logger.warning(f"Debug - DefinedGe historical data error: {str(e)}")
